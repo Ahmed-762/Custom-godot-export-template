@@ -19,7 +19,7 @@ jobs:
       - name: Checkout Project
         uses: actions/checkout@v4
 
-      - name: Setup Java (For Android Export)
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
@@ -30,8 +30,7 @@ jobs:
         with:
           ndk-version: '26.3.11579264'
 
-      # تثبيت أدوات البناء الضرورية لعمل كومبايل لمحرك Godot (Python و SCons)
-      - name: Setup Build Dependencies (Python & SCons)
+      - name: Setup Build Dependencies
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
@@ -39,7 +38,6 @@ jobs:
       - name: Install SCons
         run: python -m pip install scons
 
-      # جلب رقم أحدث إصدار مستقر وعمل Clone للسورس كود الخاص بـ Godot بالكامل
       - name: Clone Godot Engine Source Code
         id: get-version
         run: |
@@ -51,36 +49,57 @@ jobs:
           git clone --depth 1 --branch "${LATEST_TAG}-stable" https://github.com/godotengine/godot.git /tmp/godot-source
           echo "VERSION=$LATEST_TAG" >> $GITHUB_OUTPUT
 
-      # بناء المحرك من المصدر للأندرويد مع تطبيق خيارات الفصل (تأخذ وقتاً على السيرفر)
-      - name: Compile Custom Android Templates (All Architectures)
+      - name: Compile Custom Android Templates
         run: |
           cd /tmp/godot-source
+          CORES=\( (( \)(nproc) - 1))
+          echo "Compiling with -j\( CORES cores ( \){{ matrix.variant.name }})..."
           
-          echo "Compiling Release Template for Android..."
-          # بناء نسخة الـ Release لكل المعماريات القياسية مع دمج ميزات الفصل ومكتبة Swappy
-          scons platform=android target=template_release arch=arm64 ${{ matrix.variant.scons_flags }}
-          scons platform=android target=template_release arch=arm32 ${{ matrix.variant.scons_flags }}
-          scons platform=android target=template_release arch=x86_64 ${{ matrix.variant.scons_flags }}
+          scons platform=android target=template_release arch=arm64 ${{ matrix.variant.scons_flags }} -j$CORES
+          scons platform=android target=template_release arch=arm32 ${{ matrix.variant.scons_flags }} -j$CORES
+          scons platform=android target=template_release arch=x86_64 ${{ matrix.variant.scons_flags }} -j$CORES
 
-      # تجميع الملفات المصدرية الناتجة داخل مجلد المشروع
-      - name: Package Custom Android Source Templates
+      - name: Generate Godot Templates (APK + Source ZIP)
+        run: |
+          cd /tmp/godot-source/platform/android/java
+          ./gradlew generateGodotTemplates --quiet
+
+      - name: Package Artifacts
         run: |
           OUTPUT_DIR="builds/${{ matrix.variant.name }}/android"
           mkdir -p "$OUTPUT_DIR"
           
-          cd /tmp/godot-source/platform/android/java
-          # توليد ملفات الـ AAR وقوالب أندرويد المخصصة بناءً على الكومبايل الجديد
-          ./gradlew generateGodotTemplates
+          cd /tmp/godot-source
           
-          # نسخ الـ source_android.zip المخصص والمفصول من المصدر تماماً
-          cp bin/android_source.zip "$GITHUB_WORKSPACE/$OUTPUT_DIR/source_android.zip"
+          # android_source.zip
+          if [ -f "bin/android_source.zip" ]; then
+            cp bin/android_source.zip "$GITHUB_WORKSPACE/$OUTPUT_DIR/source_android.zip"
+            echo "✅ Found android_source.zip"
+          else
+            echo "⚠️ Searching for android_source.zip..."
+            find . -name "android_source.zip" -exec cp {} "$GITHUB_WORKSPACE/$OUTPUT_DIR/source_android.zip" \; || echo "❌ Not found"
+          fi
           
-          # ضغط كود مشروع لعبتك الحالي أيضاً ليكون بجانبه
+          # APK Release
+          if [ -f "bin/android_release.apk" ]; then
+            cp bin/android_release.apk "$GITHUB_WORKSPACE/\( OUTPUT_DIR/godot_template_ \){{ matrix.variant.name }}_release.apk"
+            echo "✅ Found android_release.apk"
+          else
+            echo "⚠️ Searching for APK..."
+            APK=$(find . -name "android_release.apk" | head -n 1)
+            if [ -n "$APK" ]; then
+              cp "$APK" "$GITHUB_WORKSPACE/\( OUTPUT_DIR/godot_template_ \){{ matrix.variant.name }}_release.apk"
+              echo "✅ Found APK at $APK"
+            else
+              echo "❌ No APK found!"
+            fi
+          fi
+          
+          # مشروعك
           cd $GITHUB_WORKSPACE
-          zip -r "$OUTPUT_DIR/project_source.zip" . -x "builds/*" ".git/*" ".github/*" ".godot/*"
+          zip -r "$OUTPUT_DIR/project_source.zip" . -x "builds/*" ".git/*" ".github/*" ".godot/*" "*.zip" "*.apk"
 
-      # رفع الناتج الحقيقي المنفصل برمجياً من النواة
-      - name: Upload True Split Source Artifacts
+      - name: Upload True Split Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: true-split-godot-${{ matrix.variant.name }}
