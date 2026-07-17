@@ -1,0 +1,62 @@
+name: Export Godot Game - All Platforms (2D & 3D)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - { name: "2d-only" }
+          - { name: "3d-only" }
+        platform:
+          - { name: "android",   preset: "Android",          extension: "apk" }
+          - { name: "windows",   preset: "Windows Desktop",  extension: "exe" }
+          - { name: "linux",     preset: "Linux/X11",        extension: "x86_64" }
+          - { name: "web",       preset: "Web",              extension: "html" }
+
+    steps:
+      - name: Checkout Project
+        uses: actions/checkout@v4
+
+      # إعداد Java (مهم للأندرويد و Swappy)
+      - name: Setup Java (For Android Export)
+        if: matrix.platform.name == 'android'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # تثبيت الـ Android SDK والـ NDK المطلوب لدمج Swappy عبر المعماريات
+      - name: Setup Android SDK & NDK
+        if: matrix.platform.name == 'android'
+        uses: android-actions/setup-android@v3
+        with:
+          ndk-version: '26.3.11579264' # إصدار مستقر ومتوافق مع Godot 4.3
+
+      - name: Setup Godot
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.3.0
+          include-templates: true
+
+      - name: Export ${{ matrix.platform.name }} - ${{ matrix.variant.name }}
+        run: |
+          RELEASES_DIR="builds/${{ matrix.variant.name }}/${{ matrix.platform.name }}"
+          mkdir -p "$RELEASES_DIR"
+          
+          echo "Exporting ${{ matrix.platform.name }} (${{ matrix.variant.name }})..."
+          
+          godot --headless --export-release "${{ matrix.platform.preset }}" "$RELEASES_DIR/game.${{ matrix.platform.extension }}"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: game-${{ matrix.variant.name }}-${{ matrix.platform.name }}
+          path: builds/${{ matrix.variant.name }}/${{ matrix.platform.name }}/
+          retention-days: 30
