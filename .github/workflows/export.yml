@@ -52,7 +52,7 @@ jobs:
       - name: Compile Custom Android Templates
         run: |
           cd /tmp/godot-source
-          CORES=\( (( \)(nproc) - 1))
+          CORES=$(( $(nproc) - 1 ))
           echo "Compiling with -j\( CORES cores ( \){{ matrix.variant.name }})..."
           
           scons platform=android target=template_release arch=arm64 ${{ matrix.variant.scons_flags }} -j$CORES
@@ -105,3 +105,4 @@ jobs:
           name: true-split-godot-${{ matrix.variant.name }}
           path: builds/${{ matrix.variant.name }}/android/
           retention-days: 30
+          
