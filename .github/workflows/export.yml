@@ -1,4 +1,4 @@
-name: Export Godot Game - All Platforms (2D & 3D)
+name: Export Godot Game - Android Only (2D & 3D)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
     branches: [ main ]
 
 jobs:
-  export:
+  export-android:
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -14,49 +14,59 @@ jobs:
         variant:
           - { name: "2d-only" }
           - { name: "3d-only" }
-        platform:
-          - { name: "android",   preset: "Android",          extension: "apk" }
-          - { name: "windows",   preset: "Windows Desktop",  extension: "exe" }
-          - { name: "linux",     preset: "Linux/X11",        extension: "x86_64" }
-          - { name: "web",       preset: "Web",              extension: "html" }
 
     steps:
       - name: Checkout Project
         uses: actions/checkout@v4
 
-      # إعداد Java (مهم للأندرويد و Swappy)
+      # إعداد جافا 17 الضرورية لبناء معماريات الأندرويد ومكتبة Swappy
       - name: Setup Java (For Android Export)
-        if: matrix.platform.name == 'android'
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      # تثبيت الـ Android SDK والـ NDK المطلوب لدمج Swappy عبر المعماريات
+      # تثبيت الـ Android SDK والـ NDK لبناء مكتبات تشغيل إطارات الألعاب (Swappy Engine)
       - name: Setup Android SDK & NDK
-        if: matrix.platform.name == 'android'
         uses: android-actions/setup-android@v3
         with:
-          ndk-version: '26.3.11579264' # إصدار مستقر ومتوافق مع Godot 4.3
+          ndk-version: '26.3.11579264'
 
-      - name: Setup Godot
+      # جلب وتثبيت آخر إصدار مستقر تلقائياً من Godot
+      - name: Setup Latest Godot Engine
         uses: chickensoft-games/setup-godot@v2
         with:
-          version: 4.3.0
+          version: latest # <--- جلب آخر إصدار مستقر تلقائياً
+          use-mono: false
           include-templates: true
 
-      - name: Export ${{ matrix.platform.name }} - ${{ matrix.variant.name }}
+      # تصدير اللعبة واستخراج ملف المصدر البرمجي للأندرويد
+      - name: Export Android Build & Source ZIP
         run: |
-          RELEASES_DIR="builds/${{ matrix.variant.name }}/${{ matrix.platform.name }}"
+          RELEASES_DIR="builds/${{ matrix.variant.name }}/android"
           mkdir -p "$RELEASES_DIR"
           
-          echo "Exporting ${{ matrix.platform.name }} (${{ matrix.variant.name }})..."
+          echo "Exporting Android APK (${{ matrix.variant.name }})..."
+          # أمر تصدير الـ APK الأساسي الذي يجمع كافة المعماريات
+          godot --headless --export-release "Android" "$RELEASES_DIR/game.apk"
           
-          godot --headless --export-release "${{ matrix.platform.preset }}" "$RELEASES_DIR/game.${{ matrix.platform.extension }}"
+          echo "Generating source_android.zip..."
+          # استخراج وتجهيز ملف source_android.zip من قوالب تصدير الأندرويد المدمجة في المحرك
+          GODOT_TEMPLATES_PATH="$HOME/.local/share/godot/export_templates"
+          # البحث عن مجلد الإصدار الفعلي المُنزل تلقائياً لنسخ الـ zip منه
+          VERSION_DIR=$(ls -d $GODOT_TEMPLATES_PATH/* | head -n 1)
+          
+          if [ -f "$VERSION_DIR/android_source.zip" ]; then
+            cp "$VERSION_DIR/android_source.zip" "$RELEASES_DIR/source_android.zip"
+          else
+            # في حال عدم وجوده مسبقاً، يقوم Godot بصناعته تلقائياً داخل مسار المشروع
+            godot --headless --export-pack "Android" "$RELEASES_DIR/source_android.zip" || true
+          fi
 
-      - name: Upload Artifact
+      # رفع ملف الـ APK وملف الـ source_android.zip كـ Artifacts مستقلة لكل نسخة
+      - name: Upload Android Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: game-${{ matrix.variant.name }}-${{ matrix.platform.name }}
-          path: builds/${{ matrix.variant.name }}/${{ matrix.platform.name }}/
+          name: godot-android-${{ matrix.variant.name }}
+          path: builds/${{ matrix.variant.name }}/android/
           retention-days: 30
