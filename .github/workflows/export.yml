@@ -19,7 +19,7 @@ jobs:
       - name: Checkout Project
         uses: actions/checkout@v4
 
-      # إعداد جافا 17 للأندرويد ومكتبة Swappy
+      # إعداد جافا للأندرويد ومكتبة Swappy
       - name: Setup Java (For Android Export)
         uses: actions/setup-java@v4
         with:
@@ -32,28 +32,27 @@ jobs:
         with:
           ndk-version: '26.3.11579264'
 
-      # جلب رقم أحدث إصدار مستقر تلقائياً من مستودع Godot الرسمي
-      - name: Get Latest Godot Version
+      # جلب رقم أحدث إصدار مستقر تلقائياً باستخدام Git
+      - name: Get Latest Godot Tag via Git
         id: get-version
         run: |
-          LATEST_VERSION=$(curl -s https://api.github.com/repos/godotengine/godot/releases | jq -r '[.[] | select(.prerelease == false and (.tag_name | contains("stable")))] | first .tag_name' | sed 's/-stable//')
-          # في حال فشل الـ API لأي سبب، نضع إصدار 4.3.0 كإصدار احتياطي (Fallback) لضمان عدم توقف السيرفر
-          if [ -z "$LATEST_VERSION" ] || [ "$LATEST_VERSION" = "null" ]; then
-            LATEST_VERSION="4.7.1"
+          LATEST_TAG=$(git ls-remote --tags --sort='v:refname' https://github.com/godotengine/godot.git | grep -E 'refs/tags/[0-9]+\.[0-9]+(\.[0-9]+)?-stable' | tail -n 1 | cut -d '/' -f 3 | sed 's/-stable//')
+          if [ -z "$LATEST_TAG" ]; then
+            LATEST_TAG="4.3.0"
           fi
-          echo "GODOT_VERSION=$LATEST_VERSION" >> $GITHUB_OUTPUT
-          echo "Latest stable Godot version found: $LATEST_VERSION"
+          echo "GODOT_VERSION=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "Latest stable Godot version found via Git: $LATEST_TAG"
 
-      # إعداد Godot باستخدام رقم الإصدار المجلوب تلقائياً
-      - name: Setup Latest Godot Engine
+      # إعداد نسخة Godot القياسية (العادية وليست Mono)
+      - name: Setup Latest Godot Engine (Standard/Non-Mono)
         uses: chickensoft-games/setup-godot@v2
         with:
           version: ${{ steps.get-version.outputs.GODOT_VERSION }}
-          use-mono: false
+          use-mono: false # <--- إغلاق الـ Mono تماماً ليعمل كـ محرك عادي
           include-templates: true
 
-      # تصدير اللعبة واستخراج ملف المصدر البرمجي للأندرويد
-      - name: Export Android Build & Source ZIP
+      # تصدير اللعبة وتجهيز الملفات المصدرية
+      - name: Export Android Build & Package Source
         run: |
           RELEASES_DIR="builds/${{ matrix.variant.name }}/android"
           mkdir -p "$RELEASES_DIR"
@@ -61,19 +60,22 @@ jobs:
           echo "Exporting Android APK (${{ matrix.variant.name }})..."
           godot --headless --export-release "Android" "$RELEASES_DIR/game.apk"
           
-          echo "Generating source_android.zip..."
+          echo "Generating source_android.zip (Android Build Templates)..."
           GODOT_TEMPLATES_PATH="$HOME/.local/share/godot/export_templates"
           VERSION_DIR=$(ls -d $GODOT_TEMPLATES_PATH/* | head -n 1)
           
           if [ -f "$VERSION_DIR/android_source.zip" ]; then
             cp "$VERSION_DIR/android_source.zip" "$RELEASES_DIR/source_android.zip"
           else
-            # حيلة بديلة في حال اختلف مسار القوالب لإنشاء ملف المصدر عبر ميزة التصدير الخاصة بـ Godot
             godot --headless --export-pack "Android" "$RELEASES_DIR/source_android.zip" || true
           fi
+          
+          echo "Archiving Project Source Code..."
+          # ضغط الكود المصدري لمشروع اللعبة الحالي بالكامل مع استبعاد المجلدات المؤقتة وبناء الـ CI
+          zip -r "$RELEASES_DIR/project_source.zip" . -x "builds/*" ".git/*" ".github/*" ".godot/*"
 
-      # رفع ملف الـ APK وملف الـ source_android.zip كـ Artifacts مستقلة لكل نسخة
-      - name: Upload Android Artifacts
+      # رفع كافة المخرجات (الـ APK، قالب أندرويد المخصص، وكود المشروع المصدري)
+      - name: Upload Android & Source Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: godot-android-${{ matrix.variant.name }}
