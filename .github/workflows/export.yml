@@ -19,24 +19,36 @@ jobs:
       - name: Checkout Project
         uses: actions/checkout@v4
 
-      # إعداد جافا 17 الضرورية لبناء معماريات الأندرويد ومكتبة Swappy
+      # إعداد جافا 17 للأندرويد ومكتبة Swappy
       - name: Setup Java (For Android Export)
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      # تثبيت الـ Android SDK والـ NDK لبناء مكتبات تشغيل إطارات الألعاب (Swappy Engine)
+      # تثبيت الـ Android SDK والـ NDK لبناء مكتبة Swappy لجميع المعماريات
       - name: Setup Android SDK & NDK
         uses: android-actions/setup-android@v3
         with:
           ndk-version: '26.3.11579264'
 
-      # جلب وتثبيت آخر إصدار مستقر تلقائياً من Godot
+      # جلب رقم أحدث إصدار مستقر تلقائياً من مستودع Godot الرسمي
+      - name: Get Latest Godot Version
+        id: get-version
+        run: |
+          LATEST_VERSION=$(curl -s https://api.github.com/repos/godotengine/godot/releases | jq -r '[.[] | select(.prerelease == false and (.tag_name | contains("stable")))] | first .tag_name' | sed 's/-stable//')
+          # في حال فشل الـ API لأي سبب، نضع إصدار 4.3.0 كإصدار احتياطي (Fallback) لضمان عدم توقف السيرفر
+          if [ -z "$LATEST_VERSION" ] || [ "$LATEST_VERSION" = "null" ]; then
+            LATEST_VERSION="4.7.1"
+          fi
+          echo "GODOT_VERSION=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          echo "Latest stable Godot version found: $LATEST_VERSION"
+
+      # إعداد Godot باستخدام رقم الإصدار المجلوب تلقائياً
       - name: Setup Latest Godot Engine
         uses: chickensoft-games/setup-godot@v2
         with:
-          version: latest # <--- جلب آخر إصدار مستقر تلقائياً
+          version: ${{ steps.get-version.outputs.GODOT_VERSION }}
           use-mono: false
           include-templates: true
 
@@ -47,19 +59,16 @@ jobs:
           mkdir -p "$RELEASES_DIR"
           
           echo "Exporting Android APK (${{ matrix.variant.name }})..."
-          # أمر تصدير الـ APK الأساسي الذي يجمع كافة المعماريات
           godot --headless --export-release "Android" "$RELEASES_DIR/game.apk"
           
           echo "Generating source_android.zip..."
-          # استخراج وتجهيز ملف source_android.zip من قوالب تصدير الأندرويد المدمجة في المحرك
           GODOT_TEMPLATES_PATH="$HOME/.local/share/godot/export_templates"
-          # البحث عن مجلد الإصدار الفعلي المُنزل تلقائياً لنسخ الـ zip منه
           VERSION_DIR=$(ls -d $GODOT_TEMPLATES_PATH/* | head -n 1)
           
           if [ -f "$VERSION_DIR/android_source.zip" ]; then
             cp "$VERSION_DIR/android_source.zip" "$RELEASES_DIR/source_android.zip"
           else
-            # في حال عدم وجوده مسبقاً، يقوم Godot بصناعته تلقائياً داخل مسار المشروع
+            # حيلة بديلة في حال اختلف مسار القوالب لإنشاء ملف المصدر عبر ميزة التصدير الخاصة بـ Godot
             godot --headless --export-pack "Android" "$RELEASES_DIR/source_android.zip" || true
           fi
 
